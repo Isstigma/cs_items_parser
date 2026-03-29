@@ -34,7 +34,7 @@ class Item(Base):
             "tool": self.tool,
             "tags": self.tags,
             "attributes": self.attributes,
-            "prefab": None if self.prefab is None else self.prefab.asdict(),
+            "prefab": None,# if self.prefab is None else self.prefab.asdict(),
             "quality": None if self.quality is None else self.quality.asdict(),
             "rarity": None if self.rarity is None else self.rarity.asdict(),
         }

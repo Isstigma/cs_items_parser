@@ -64,7 +64,7 @@ class ItemsManager:
         self.__delete_empty_prefabs()
 
     def __delete_unnecessary_data(self):
-        for key in ["campaign_definitions", "quest_schedule", "skirmish_modes", "skirmish_rank_info", "recipes", "pro_event_results", "pro_players", "pro_teams", "items_game_live"]:
+        for key in ["campaign_definitions", "skirmish_modes", "skirmish_rank_info", "recipes", "pro_event_results", "pro_players", "pro_teams", "items_game_live"]:
             del self.items_game[key]
         self.logger.debug(f"Deleted unnecessary data")
 
@@ -118,8 +118,9 @@ class ItemsManager:
             return tree
 
         for prefab_name in data["prefab"].split(" "):
-            tree.append(prefab_name)
-            tree += self.__get_prefab_tree(self.items_game["prefabs"][prefab_name])
+            if prefab_name in self.items_game["prefabs"]:
+                tree.append(prefab_name)
+                tree += self.__get_prefab_tree(self.items_game["prefabs"][prefab_name])
 
         return tree
 
@@ -398,9 +399,9 @@ class ItemsManager:
                     if item_lootlist_name is not None and item_lootlist_name in self.items_game["client_loot_lists"]:
                         continue
 
-                    container = self.get_item(item_cdn)
-                    if container not in lootlists[lootlist_cdn].containers:
-                        lootlists[lootlist_cdn].containers.append(container)
+                    #container = self.get_item(item_cdn)
+                    #if container not in lootlists[lootlist_cdn].containers:
+                    #    lootlists[lootlist_cdn].containers.append(container)
 
         self.lootlists = list(sorted(lootlists.values(), key=lambda x: len(x.containers), reverse=True))
 
@@ -419,10 +420,10 @@ class ItemsManager:
                     continue
                 if "ItemSet" not in item_data["tags"]:
                     continue
-                if item_data["tags"]["ItemSet"]["tag_value"] == collection_cdn:
-                    crate = Item(codename=item_cdn, data=item_data)
-                    crate.prefab = self.get_prefab(item_data["prefab"])
-                    collection.crates.append(crate)
+                #if item_data["tags"]["ItemSet"]["tag_value"] == collection_cdn:
+                    #crate = Item(codename=item_cdn, data=item_data)
+                    #crate.prefab = self.get_prefab(item_data["prefab"])
+                    #collection.crates.append(crate)
 
             self.collections.append(collection)
 

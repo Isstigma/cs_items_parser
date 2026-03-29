@@ -16,6 +16,6 @@ class Lootlist(Base):
         return {
             "codename": self.codename,
             "aliases": list(self.aliases),
-            "items": self.items,
-            "containers": [item.asdict() for item in self.containers]
+            "items": self.items
+            ##"containers": [item.asdict() for item in self.containers]
         }

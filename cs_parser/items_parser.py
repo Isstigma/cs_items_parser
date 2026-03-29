@@ -144,7 +144,7 @@ class ItemsParser:
 
             return False
 
-        def get_wear_variants(item: Item, paintkit: Paintkit) -> list[str]:
+        def get_wear_variants(item: Item, paintkit: Paintkit) -> list[Variant]:
             wear_ranges = {
                 "Factory New": [0.00, 0.07],
                 "Minimal Wear": [0.07, 0.15],
@@ -154,7 +154,6 @@ class ItemsParser:
             }
 
             item_name = self.items_manager.get_market_hash_name(item.name_tag)
-            paintkit_name = self.items_manager.get_market_hash_name(paintkit.name_tag)
             if paintkit.codename == "default":
                 return [item_name]
 
@@ -165,6 +164,23 @@ class ItemsParser:
             if paintkit.wear_remap_max is not None:
                 wear_remap_max = paintkit.wear_remap_max
 
+            paintkit_name = get_paintkitname_fixed(paintkit)
+
+            results = []
+            for wear_name in wear_ranges:
+                if float(wear_remap_min) < wear_ranges[wear_name][1] and float(wear_remap_max) > wear_ranges[wear_name][0]:
+                    #fullname = f"{item_name} | {paintkit_name} ({wear_name})"
+                    variant = Variant(f"{item_name} | {paintkit_name} ({wear_name})", 
+                                      max(float(wear_remap_min), float(wear_ranges[wear_name][0])), 
+                                      min(float(wear_remap_max), float(wear_ranges[wear_name][1])),
+                                      wear_name, "Normal")
+                    results.append(variant)
+
+            return results
+
+        @staticmethod
+        def get_paintkitname_fixed(paintkit):
+            paintkit_name = self.items_manager.get_market_hash_name(paintkit.name_tag)
             # fix doppler names
             doppler_tags = ["PaintKit_am_marbleized_Tag", "PaintKit_am_marbleized_g_Tag"]
             if paintkit.name_tag.lstrip("#") in doppler_tags:
@@ -178,13 +194,7 @@ class ItemsParser:
                     paintkit_name = f"{paintkit_name} Emerald"
                 if "_phase" in paintkit.codename:
                     paintkit_name = f"{paintkit_name} Phase {paintkit.codename.split('_phase')[1][0]}"
-
-            results = []
-            for wear_name in wear_ranges:
-                if float(wear_remap_min) < wear_ranges[wear_name][1] and float(wear_remap_max) > wear_ranges[wear_name][0]:
-                    results.append(f"{item_name} | {paintkit_name} ({wear_name})")
-
-            return results
+            return paintkit_name
 
         def is_customizable(item: Item) -> bool:
             prefab_tree = self.items_manager.get_prefab_tree(item.prefab)
@@ -214,19 +224,29 @@ class ItemsParser:
 
                 variants = get_wear_variants(item, paintkit)
                 if has_souvenir(item, paintkit, lootlist):
-                    variants += [f"Souvenir {variant}" for variant in variants]
+                    variants += [Variant(f"Souvenir {variant.full_name}", variant.wear_from, variant.wear_to, variant.wear_name, "Souvenir")
+                                 for variant 
+                                 in variants]
                 elif has_stattrak(item, paintkit):
-                    variants += [f"StatTrak™ {variant}" for variant in variants]
+                    variants += [Variant(f"StatTrak™ {variant.full_name}", variant.wear_from, variant.wear_to, variant.wear_name, "Stattrak")
+                                 for variant 
+                                 in variants]
 
                 if has_star_prefix(item):
-                    variants = [f"★ {variant}" for variant in variants]
+                    variants = [Variant(f"★ {variant.full_name}", variant.wear_from, variant.wear_to, variant.wear_name, "Star")
+                                 for variant 
+                                 in variants]
 
-                for variant in variants:
-                    results[variant] = {
+                self.logger.debug("Variants are: %s", variants)
+                item_name = self.items_manager.get_market_hash_name(item.name_tag)
+                paintkit_name = get_paintkitname_fixed(paintkit)
+
+                results[f"{item_name} | {paintkit_name}"] = {
                         "item": item.asdict(),
                         "paintkit": paintkit.asdict(),
                         "collection": None if collection is None else collection.asdict(),
-                        "lootlist": None if lootlist is None else lootlist.asdict()
+                        "lootlist": None if lootlist is None else lootlist.asdict(), 
+                        "variants": None if variants is None else [variant.asdict() for variant in variants]
                     }
 
         return results
@@ -342,7 +362,7 @@ class ItemsParser:
                 if container.codename in self.nonexisting_containers:
                     continue
                 container_name = self.items_manager.get_market_hash_name(container.name_tag)
-                results[container_name] = {"lootlist": lootlist.asdict(), "container": container.asdict()}
+                results[container_name] = {"lootlist": lootlist.asdict_cont(), "container": container.asdict()}
 
         return results
 
