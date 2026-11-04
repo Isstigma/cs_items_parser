@@ -1,6 +1,8 @@
 import logging
 import re
 
+from cs_parser.db import RarityEnum
+
 from .items_manager import ItemsManager
 from .structs import *
 
@@ -11,46 +13,6 @@ class ItemsParser:
         self.logger = logging.getLogger("ItemsParser")
         self.manual_changes()
 
-        self.souvenir_collections = {
-            "set_vertigo":          "The Vertigo Collection",
-            "set_inferno":          "The Inferno Collection",
-            "set_nuke":             "The Nuke Collection",
-            "set_dust_2":           "The Dust 2 Collection",
-            "set_train":            "The Train Collection",
-            "set_mirage":           "The Mirage Collection",
-            "set_italy":            "The Italy Collection",
-            "set_lake":             "The Lake Collection",
-            "set_safehouse":        "The Safehouse Collection",
-            "set_overpass":         "The Overpass Collection",
-            "set_cobblestone":      "The Cobblestone Collection",
-            "set_cache":            "The Cache Collection",
-            "set_nuke_2":           "The 2018 Nuke Collection",
-            "set_inferno_2":        "The 2018 Inferno Collection",
-            "set_blacksite":        "The Blacksite Collection",
-            "set_dust_2_2021":      "The 2021 Dust 2 Collection",
-            "set_mirage_2021":      "The 2021 Mirage Collection",
-            "set_op10_ancient":     "The Ancient Collection",
-            "set_vertigo_2021":     "The 2021 Vertigo Collection"
-        }
-        self.blank_collections = {
-            "set_dust":                 "The Dust Collection",
-            "set_aztec":                "The Aztec Collection",
-            "set_militia":              "The Militia Collection",
-            "set_office":               "The Office Collection",
-            "set_assault":              "The Assault Collection",
-            "set_bravo_ii":             "The Alpha Collection",
-            "set_bank":                 "The Bank Collection",
-            "set_baggage":              "The Baggage Collection",
-            "set_gods_and_monsters":    "The Gods and Monsters Collection",
-            "set_chopshop":             "The Chop Shop Collection",
-            "set_kimono":               "The Rising Sun Collection",
-            "set_stmarc":               "The St. Marc Collection",
-            "set_canals":               "The Canals Collection",
-            "set_norse":                "The Norse Collection",
-            "set_op10_ct":              "The Control Collection",
-            "set_op10_t":               "The Havoc Collection",
-            "set_train_2021":           "The 2021 Train Collection"
-        }
         self.nonexisting_containers = {
             "crate_sticker_pack_broken_fang":           "Broken Fang Sticker Collection",
             "crate_patch_pack02":                       "Metal Skill Group Patch Collection",
@@ -98,41 +60,66 @@ class ItemsParser:
     # -------------------------------------- GETTERS -------------------------------------- #
 
     def get_skins(self):
+        # One-off StatTrak containers that carry no keyed/volatile marker and
+        # can't be detected structurally (the 2019 X-Ray P250 Package, prefab
+        # plain "weapon_case_base"). Hardcoded like the knife case.
+        special_stattrak_crates = {"crate_xray_p250"}
+
+        def crate_produces_stattrak(crate: Item) -> bool:
+            if crate.codename in special_stattrak_crates:
+                return True
+            # A crate produces StatTrak if it is a case you open, of which there
+            # are two kinds:
+            #   1. Keyed weapon cases: prefab "weapon_case" (a key via
+            #      associated_items + tool.restriction).
+            #   2. Self-opening volatile "Terminal" cases (e.g. Sealed Genesis
+            #      Terminal): prefab is multi-token
+            #      ("volatile_pricing weapon_case_selfopening_collection") so it
+            #      doesn't resolve — identify these by the "volatile container"
+            #      attribute instead.
+            # This excludes the non-volatile self-opening store promo (Anubis
+            # Collection Package), which hands out a collection for free with
+            # neither a key nor the volatile marker, so it produces no StatTrak.
+            if crate.prefab is not None:
+                crate_prefabs = {crate.prefab.codename} | set(self.items_manager.get_prefab_tree(crate.prefab))
+                if "weapon_case" in crate_prefabs:
+                    return True
+            return "volatile container" in crate.attributes
+
         def has_stattrak(item: Item, paintkit: Paintkit) -> bool:
             prefab_tree = self.items_manager.get_prefab_tree(item.prefab)
-            if "statted_item_base" not in prefab_tree:
+            if item.prefab is not None:
+                prefab_tree = prefab_tree + [item.prefab.codename]
+
+            # Gloves can never be StatTrak.
+            if "hands_paintable" in prefab_tree:
                 return False
 
-            for collection in self.items_manager.collections:
-                if f"[{paintkit.codename}]{item.codename}" in collection.items:
-                    if collection.codename in self.blank_collections:
-                        return False
-
-            return True
-
-        def has_souvenir(item: Item, paintkit: Paintkit, lootlist: Lootlist | None) -> bool:
-            if lootlist is not None:
-                for lootlist in self.items_manager.lootlists:
-                    if f"[{paintkit.codename}]{item.codename}" in lootlist.items:
-                        for container in lootlist.containers:
-                            container_prefab_tree = self.items_manager.get_prefab_tree(container.prefab)
-                            if "weapon_case_souvenirpkg" in container_prefab_tree:
-                                return True
-
-            # fallback
-            for collection in self.items_manager.collections:
-                if f"[{paintkit.codename}]{item.codename}" in collection.items:
-                    if collection.codename in self.souvenir_collections:
-                        return True
-
-            # souvenir bone mask bug
-            if item.codename == "weapon_revolver" and paintkit.codename == "sp_tape":
+            # Every knife can be StatTrak. (Knives are the rare items of keyed
+            # cases but aren't linked to them in the game files, so they can't
+            # be detected via the container discriminator below — hardcode them.)
+            if "melee_unusual" in prefab_tree:
                 return True
+
+            # Regular weapon skins are StatTrak only when they drop from a case.
+            # Check both the skin's collection crates and any loot-list
+            # containers — the collection path catches skins whose loot-list
+            # linkage is incomplete (e.g. PP-Bizon | Judgement of Anubis, from
+            # Chroma 3 / set_community_12).
+            target = f"[{paintkit.codename}]{item.codename}"
+            for collection in self.items_manager.collections:
+                if target in {i.lower() for i in collection.items}:
+                    if any(crate_produces_stattrak(c) for c in collection.crates):
+                        return True
+            for lootlist in self.items_manager.lootlists:
+                if target in lootlist.items:
+                    if any(crate_produces_stattrak(c) for c in lootlist.containers):
+                        return True
 
             return False
 
         def has_star_prefix(item: Item) -> bool:
-            prefab_tree = self.items_manager.get_prefab_tree(item.prefab)
+            prefab_tree = self.items_manager.get_prefab_tree(item.prefab) + [item.prefab.codename]
 
             # gloves
             if "hands_paintable" in prefab_tree:
@@ -204,6 +191,21 @@ class ItemsParser:
 
             return False
 
+        def find_rarity_group(loot_lists: dict, lootlist_key: str, crate_key: str, paintkit_codename: str) -> str | None:
+            client_loot_lists = loot_lists[lootlist_key]
+            if crate_key not in client_loot_lists and f"{crate_key}_lootlist" not in client_loot_lists:
+                return None
+            loot_list_entry = client_loot_lists.get(crate_key) or client_loot_lists.get(f"{crate_key}_lootlist")
+            for sub_key, sub_value in loot_list_entry.items():
+                if isinstance(sub_value, dict):
+                    if any(item_key[1:item_key.index(']')] == paintkit_codename for item_key in client_loot_lists[sub_key]):
+                        return sub_key
+            for rarity in [r.value for r in RarityEnum]:
+                rarity_key = f"{crate_key}_{rarity}"
+                if rarity_key in client_loot_lists:
+                    if any(item_key[1:item_key.index(']')] == paintkit_codename for item_key in client_loot_lists[rarity_key]):
+                        return rarity
+            return None
 
         results = {}
         self.logger.debug("Parsing skins...")
@@ -222,28 +224,56 @@ class ItemsParser:
                 lootlist = self.get_lootlist_by_item_codename(f"[{paintkit.codename}]{item.codename}")
                 collection = self.get_collection_by_item_codename(f"[{paintkit.codename}]{item.codename}")
 
+                # Skip unreleased "phantom" skins that have no source in the
+                # current game data (no collection and no loot list) — a texture
+                # exists so skin_exists() passes, but they were never in a case
+                # or collection. Gold items (knives/gloves) are exempt: they are
+                # legitimate case rare-items that never appear in a collection.
+                if collection is None and lootlist is None and not has_star_prefix(item):
+                    continue
+
+                retrieved_collection_rarity = None
+                for alias in (lootlist.aliases if lootlist is not None else set()) | ({collection.codename} if collection is not None else set()):
+                    collection_rarity = find_rarity_group(self.items_manager.items_game, "client_loot_lists", alias, paintkit.codename) if collection is not None else None
+                    if collection_rarity is not None:
+                        retrieved_collection_rarity = collection_rarity
+                        break
+
                 variants = get_wear_variants(item, paintkit)
-                if has_souvenir(item, paintkit, lootlist):
-                    variants += [Variant(f"Souvenir {variant.full_name}", variant.wear_from, variant.wear_to, variant.wear_name, "Souvenir")
-                                 for variant 
-                                 in variants]
-                elif has_stattrak(item, paintkit):
+
+                # StatTrak and Souvenir are independent, distinct variant sets,
+                # each derived from the base (Normal) wear variants. A skin may
+                # have both, but there is never a combined "Souvenir StatTrak".
+                base_variants = list(variants)
+
+                if has_stattrak(item, paintkit):
                     variants += [Variant(f"StatTrak™ {variant.full_name}", variant.wear_from, variant.wear_to, variant.wear_name, "Stattrak")
-                                 for variant 
-                                 in variants]
+                                 for variant
+                                 in base_variants]
+
+                # Every non-gold (regular weapon) skin can be Souvenir; gold
+                # items (knives/gloves, i.e. has_star_prefix) never are. The
+                # "default" (vanilla) paintkit yields no wear variants to derive.
+                if paintkit.codename != "default" and not has_star_prefix(item):
+                    variants += [Variant(f"Souvenir {variant.full_name}", variant.wear_from, variant.wear_to, variant.wear_name, "Souvenir")
+                                 for variant
+                                 in base_variants]
 
                 if has_star_prefix(item):
-                    variants = [Variant(f"★ {variant.full_name}", variant.wear_from, variant.wear_to, variant.wear_name, "Star")
-                                 for variant 
+                    # ★ is only a name decoration; the underlying kind
+                    # (Normal / Stattrak / Souvenir) is preserved.
+                    variants = [Variant(f"★ {variant.full_name}", variant.wear_from, variant.wear_to, variant.wear_name, variant.kind)
+                                 for variant
                                  in variants]
 
-                self.logger.debug("Variants are: %s", variants)
+                # self.logger.debug("Variants are: %s", variants)
                 item_name = self.items_manager.get_market_hash_name(item.name_tag)
                 paintkit_name = get_paintkitname_fixed(paintkit)
 
                 results[f"{item_name} | {paintkit_name}"] = {
                         "item": item.asdict(),
                         "paintkit": paintkit.asdict(),
+                        "collection_rarity": retrieved_collection_rarity,
                         "collection": None if collection is None else collection.asdict(),
                         "lootlist": None if lootlist is None else lootlist.asdict(), 
                         "variants": None if variants is None else [variant.asdict() for variant in variants]

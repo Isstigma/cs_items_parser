@@ -6,6 +6,8 @@ import re
 
 from vdf import VDFDict
 
+from cs_parser.db import ItemKindEnum
+
 from .structs import *
 
 class ItemsManager:
@@ -220,6 +222,12 @@ class ItemsManager:
             item.prefab = self.get_prefab(item_data.get("prefab"))
             item.quality = self.get_quality(item_data.get("item_quality"))
             item.rarity = self.get_rarity(item_data.get("item_rarity"))
+            prefab = item_data.get("prefab") or ""
+
+            if prefab == "melee_unusual" or prefab == "hands_paintable":
+                item.kind = ItemKindEnum.gold
+            else:
+                item.kind = ItemKindEnum.weapon
 
             if "attributes" in item_data:
                 for attribute_name in item_data["attributes"]:
@@ -235,7 +243,10 @@ class ItemsManager:
 
                     # add combined attribute information
                     item.attributes[attribute_name] = dict(attribute_data)
-            if item.name_tag is None:
+            # Inherit the display name from the prefab only when one resolved.
+            # Some items reference multiple prefabs (e.g. tournament credits),
+            # which get_prefab can't match by exact codename, leaving prefab None.
+            if item.name_tag is None and item.prefab is not None:
                 item.name_tag = item.prefab.name_tag
 
             self.items.append(item)
@@ -319,7 +330,7 @@ class ItemsManager:
 
             for attribute_name in item_data.get("attributes", []):
                 if attribute_name == "set supply crate series":
-                    revolving_index = item_data["attributes"][attribute_name]["value"]
+                    revolving_index = self.__attr_value(item_data["attributes"][attribute_name])
                     revolving_lootlist_name = self.items_game["revolving_loot_lists"][revolving_index]
                     if revolving_lootlist_name is not None and revolving_lootlist_name in client_loot_lists:
                         lootlists[revolving_lootlist_name] = Lootlist(codename=revolving_lootlist_name, data=item_data)
@@ -342,7 +353,7 @@ class ItemsManager:
                     alias_set.add(item_data["tags"][tag]["tag_value"])
             for attribute in item_data.get("attributes", []):
                 if attribute == "set supply crate series":
-                    index = item_data["attributes"][attribute]["value"]
+                    index = self.__attr_value(item_data["attributes"][attribute])
                     alias_set.add(self.items_game["revolving_loot_lists"][index])
 
             if alias_set:
@@ -409,7 +420,9 @@ class ItemsManager:
         self.logger.debug("Parsing collections...")
         for collection_cdn in self.items_game["item_sets"]:
             collection_data = self.items_game["item_sets"][collection_cdn]
-            collection = Collection(codename=collection_cdn, data=collection_data)
+            collection = Collection(codename=collection_cdn, 
+                                    name=self.tokens.get(collection_data.get("name").lstrip("#").lower()), 
+                                    data=collection_data)
             for item_cdn in self.items_game["items"]:
                 item_data = self.items_game["items"][item_cdn]
                 if "attributes" not in item_data:
@@ -536,7 +549,20 @@ class ItemsManager:
             return prefab_tree
 
         for i in prefab.prefabs:
+            # A prefab can reference a sub-prefab that isn't defined
+            # (e.g. "valve"), which get_prefab resolves to None. Skip those.
+            if i is None:
+                continue
             prefab_tree.append(i.codename)
             prefab_tree += ItemsManager.get_prefab_tree(i)
 
         return prefab_tree
+
+    @staticmethod
+    def __attr_value(attribute):
+        # An item attribute can be either the full VDF dict form
+        # ({"value": "28", "attribute_class": ...}) or a bare string
+        # shorthand ("28"). Normalise both to the underlying value.
+        if isinstance(attribute, (VDFDict, dict)):
+            return attribute["value"]
+        return attribute

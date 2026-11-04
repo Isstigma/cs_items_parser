@@ -4,9 +4,9 @@ from .Base import Base
 from .Item import Item
 
 class Collection(Base):
-    def __init__(self, codename: str, data: VDFDict):
+    def __init__(self, codename: str, name: str, data: VDFDict):
         super().__init__(codename)
-        self.name_tag: str = data.get("name")
+        self.name_tag: str = name
         self.crates: list[Item] = []
         self.items: list[str] = [i for i in data["items"]]
 

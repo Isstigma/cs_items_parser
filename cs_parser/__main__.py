@@ -47,6 +47,34 @@ def main():
         help="Enable verbose output"
     )
 
+    parser.add_argument(
+        "--db",
+        action="store_true",
+        default=False,
+        help="Save parsed skins data to PostgreSQL instead of a JSON file"
+    )
+
+    parser.add_argument(
+        "--db-url",
+        type=str,
+        default="postgresql://postgres:admin@localhost:5432/cs",
+        help="PostgreSQL connection URL (default: postgresql://localhost/cs_items)"
+    )
+
+    parser.add_argument(
+        "--prune",
+        action="store_true",
+        default=False,
+        help="Delete DB rows the parser no longer produces (unreleased/phantom skins, stale variants). Dry-run unless --apply is given. Skins only."
+    )
+
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        default=False,
+        help="With --prune, actually execute the deletions (default is a dry-run report)."
+    )
+
     args = parser.parse_args()
 
     if args.verbose:
@@ -54,6 +82,28 @@ def main():
 
     items_parser = ItemsParser()
     items_parser.update_files()
+
+    # DB operations work on the skins set. --prune (optionally --apply) cleans
+    # up rows the parser no longer produces; --db inserts the current output.
+    # Combine them for a full sync: --prune --apply --db.
+    if args.prune or args.db:
+        skins = items_parser.get_skins()
+
+        if args.prune:
+            from .db import prune_orphaned_skins
+            counts = prune_orphaned_skins(skins, args.db_url, apply=args.apply)
+            action = "Pruned DB" if args.apply else "Prune dry-run (no changes; pass --apply to execute)"
+            logging.info("%s: %s", action, counts)
+            print(f"{action}: {counts}")
+
+        if args.db:
+            from .db import save_skins_to_db
+            save_skins_to_db(skins, args.db_url)
+
+        return
+
+    if args.apply:
+        parser.error("--apply only has an effect together with --prune")
 
     if args.type == "all":
         save_to_file({

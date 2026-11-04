@@ -1,115 +1,284 @@
-from typing import Any, Optional
+from enum import Enum, IntEnum
+from typing import Optional
+
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import SQLModel, Field, Session, create_engine
 import logging
 
 logger = logging.getLogger("db")
 
 
-class Skin(SQLModel, table=True):
-    __tablename__ = "skins"
-    market_hash_name: str = Field(primary_key=True)
-    item: Any = Field(sa_column=sa.Column(sa.JSON, nullable=False))
-    paintkit: Any = Field(sa_column=sa.Column(sa.JSON, nullable=False))
-    collection: Optional[Any] = Field(default=None, sa_column=sa.Column(sa.JSON, nullable=True))
-    lootlist: Optional[Any] = Field(default=None, sa_column=sa.Column(sa.JSON, nullable=True))
-    variants: Optional[Any] = Field(default=None, sa_column=sa.Column(sa.JSON, nullable=True))
+class RarityEnum(str, Enum):
+    default = "default"
+    common = "common"
+    uncommon = "uncommon"
+    rare = "rare"
+    mythical = "mythical"
+    legendary = "legendary"
+    ancient = "ancient"
+    immortal = "immortal"
 
 
-class Sticker(SQLModel, table=True):
-    __tablename__ = "stickers"
-    market_hash_name: str = Field(primary_key=True)
-    stickerkit: Any = Field(sa_column=sa.Column(sa.JSON, nullable=False))
+class WearKindEnum(str, Enum):
+    factory_new = "Factory New"
+    minimal_wear = "Minimal Wear"
+    field_tested = "Field-Tested"
+    well_worn = "Well-Worn"
+    battle_scarred = "Battle-Scarred"
+
+class ItemKindEnum(str, Enum):
+    weapon = "weapon"
+    gold = "gold"
+    # knife = "knife"
+
+_ITEM_KIND_MAP = {e.value: e for e in ItemKindEnum}
+
+class MarketEnum(str, Enum):
+    steam_community_market = "steam_community_market"
+
+class VariantKindEnum(IntEnum):
+    normal = 0
+    stattrak = 1
+    star = 2  # OBSOLETE: ★ is only a name prefix now, never written as a kind. Value reserved, do not reuse.
+    souvenir = 3
 
 
-class Patch(SQLModel, table=True):
-    __tablename__ = "patches"
-    market_hash_name: str = Field(primary_key=True)
-    stickerkit: Any = Field(sa_column=sa.Column(sa.JSON, nullable=False))
-
-
-class Graffiti(SQLModel, table=True):
-    __tablename__ = "graffities"
-    market_hash_name: str = Field(primary_key=True)
-    stickerkit: Any = Field(sa_column=sa.Column(sa.JSON, nullable=False))
-
-
-class MusicKit(SQLModel, table=True):
-    __tablename__ = "musickits"
-    market_hash_name: str = Field(primary_key=True)
-    item: Any = Field(sa_column=sa.Column(sa.JSON, nullable=False))
-    musicdef: Any = Field(sa_column=sa.Column(sa.JSON, nullable=False))
-
-
-class KeychainItem(SQLModel, table=True):
-    __tablename__ = "keychains"
-    market_hash_name: str = Field(primary_key=True)
-    item: Any = Field(sa_column=sa.Column(sa.JSON, nullable=False))
-    keychain: Any = Field(sa_column=sa.Column(sa.JSON, nullable=False))
-
-
-class Agent(SQLModel, table=True):
-    __tablename__ = "agents"
-    market_hash_name: str = Field(primary_key=True)
-    item: Any = Field(sa_column=sa.Column(sa.JSON, nullable=False))
-
-
-class Container(SQLModel, table=True):
-    __tablename__ = "containers"
-    market_hash_name: str = Field(primary_key=True)
-    lootlist: Any = Field(sa_column=sa.Column(sa.JSON, nullable=False))
-    container: Any = Field(sa_column=sa.Column(sa.JSON, nullable=False))
-
-
-class ContainerKey(SQLModel, table=True):
-    __tablename__ = "container_keys"
-    market_hash_name: str = Field(primary_key=True)
-    item: Any = Field(sa_column=sa.Column(sa.JSON, nullable=False))
-
-
-class Pin(SQLModel, table=True):
-    __tablename__ = "pins"
-    market_hash_name: str = Field(primary_key=True)
-    item: Any = Field(sa_column=sa.Column(sa.JSON, nullable=False))
-
-
-class Pass(SQLModel, table=True):
-    __tablename__ = "passes"
-    market_hash_name: str = Field(primary_key=True)
-    item: Any = Field(sa_column=sa.Column(sa.JSON, nullable=False))
-
-
-_MODEL_MAP = {
-    "skins": Skin,
-    "stickers": Sticker,
-    "patches": Patch,
-    "graffities": Graffiti,
-    "musickits": MusicKit,
-    "keychains": KeychainItem,
-    "agents": Agent,
-    "containers": Container,
-    "container_keys": ContainerKey,
-    "pins": Pin,
-    "passes": Pass,
+_WEAR_KIND_MAP = {e.value: e for e in WearKindEnum}
+_VARIANT_KIND_MAP = {
+    "Normal": VariantKindEnum.normal,
+    "Stattrak": VariantKindEnum.stattrak,
+    "Souvenir": VariantKindEnum.souvenir,
 }
 
 
-def save_to_db(data: dict[str, dict], db_url: str) -> None:
-    """Save parsed items to PostgreSQL. Creates tables if they don't exist, upserts records.
+class Paintkit(SQLModel, table=True):
+    __tablename__ = "paintkits"
 
-    Args:
-        data: {item_type: {market_hash_name: {field: value, ...}}}
-        db_url: SQLAlchemy-compatible PostgreSQL URL, e.g. postgresql://localhost/cs_items
-    """
+    codename: str = Field(primary_key=True)
+    name: str = Field()
+    wear_min: Optional[float] = Field(default=None)
+    wear_max: Optional[float] = Field(default=None)
+    item_code: Optional[str] = Field(default=None)
+    paintkit_code: Optional[str] = Field(default=None)
+    rarity: Optional[RarityEnum] = Field(
+        default=None,
+        sa_column=sa.Column(sa.Enum(RarityEnum), nullable=True),
+    )
+    kind: Optional[ItemKindEnum] = Field(
+        default=None,
+        sa_column=sa.Column(sa.Enum(ItemKindEnum), nullable=False),
+    )
+
+class Collection(SQLModel, table=True):
+    __tablename__ = "collections"
+
+    codename: str = Field(primary_key=True)
+    name: str = Field()
+
+
+class PaintkitCollection(SQLModel, table=True):
+    __tablename__ = "paintkit_collections"
+
+    paintkit_codename: str = Field(foreign_key="paintkits.codename", primary_key=True)
+    collection_codename: str = Field(foreign_key="collections.codename", primary_key=True)
+
+
+class PaintkitVariant(SQLModel, table=True):
+    __tablename__ = "paintkit_variants"
+
+    full_name: str = Field(primary_key=True)
+    paintkit_codename: str = Field(foreign_key="paintkits.codename")
+    wear_from: Optional[float] = Field(default=None)
+    wear_to: Optional[float] = Field(default=None)
+    wear_kind: Optional[WearKindEnum] = Field(
+        default=None,
+        sa_column=sa.Column(sa.Enum(WearKindEnum), nullable=True),
+    )
+    kind: int = Field(sa_column=sa.Column(sa.SmallInteger, nullable=False))
+
+
+# Add serial id to every table whose PK is a string, without involving the ORM.
+# append_column keeps the column out of SQLAlchemy's mapper so merge() never
+# touches it, while create_all() still emits it as GENERATED BY DEFAULT AS IDENTITY.
+for _tbl in [Paintkit.__table__, Collection.__table__,
+             PaintkitCollection.__table__, PaintkitVariant.__table__]:
+    _tbl.append_column(sa.Column("id", sa.Integer, sa.Identity(always=False), nullable=False))
+
+
+def _skin_codename(item_codename: str, paintkit_codename: str) -> str:
+    if paintkit_codename == "default":
+        return item_codename
+    return f"{item_codename}_{paintkit_codename}"
+
+
+def _insert_ignore(session: Session, table, values: dict, index_elements: list[str]) -> None:
+    """INSERT ... ON CONFLICT (index_elements) DO NOTHING for a single row."""
+    stmt = (
+        pg_insert(table)
+        .values(**values)
+        .on_conflict_do_nothing(index_elements=index_elements)
+    )
+    session.execute(stmt)
+
+
+def save_skins_to_db(skins: dict, db_url: str) -> None:
     engine = create_engine(db_url)
     SQLModel.metadata.create_all(engine)
 
     with Session(engine) as session:
-        for item_type, items in data.items():
-            model_cls = _MODEL_MAP[item_type]
-            for market_hash_name, values in items.items():
-                record = model_cls(market_hash_name=market_hash_name, **values)
-                session.merge(record)
-        session.commit()
+        for market_hash_name, skin_data in skins.items():
+            pk_data = skin_data["paintkit"]
+            item_data = skin_data["item"]
+            col_data = skin_data.get("collection")
+            variants_data = skin_data.get("variants") or []
 
-    logger.info("Data saved to database (%s)", db_url)
+            item_code = item_data["codename"]
+            paintkit_code = pk_data["codename"]
+            codename = _skin_codename(item_code, paintkit_code)
+
+            # Paintkit
+            rarity_raw = skin_data.get("collection_rarity") or (pk_data.get("rarity") or {}).get("codename")
+            rarity = RarityEnum(rarity_raw) if rarity_raw in RarityEnum._value2member_map_ else None
+
+            kind_raw = item_data.get("kind") or ""
+            kind = _ITEM_KIND_MAP.get(kind_raw, None)
+
+            _insert_ignore(session, Paintkit.__table__, {
+                "codename": codename,
+                "name": market_hash_name,
+                "wear_min": float(pk_data["wear_remap_min"]) if pk_data.get("wear_remap_min") is not None else None,
+                "wear_max": float(pk_data["wear_remap_max"]) if pk_data.get("wear_remap_max") is not None else None,
+                "item_code": item_code,
+                "paintkit_code": paintkit_code,
+                "rarity": rarity,
+                "kind": kind,
+            }, index_elements=["codename"])
+
+            # Collection + link
+            if col_data:
+                _insert_ignore(session, Collection.__table__, {
+                    "codename": col_data["codename"],
+                    "name": col_data["name_tag"],
+                }, index_elements=["codename"])
+                _insert_ignore(session, PaintkitCollection.__table__, {
+                    "paintkit_codename": codename,
+                    "collection_codename": col_data["codename"],
+                }, index_elements=["paintkit_codename", "collection_codename"])
+
+            # Variants
+            for variant in variants_data:
+                if not isinstance(variant, dict):
+                    continue
+
+                variant_kind = _VARIANT_KIND_MAP.get(variant.get("kind"))
+                if variant_kind is None:
+                    continue  # safety net: skip variants with an unmapped kind
+
+                wear_kind = _WEAR_KIND_MAP.get(variant.get("wear_name"))
+
+                _insert_ignore(session, PaintkitVariant.__table__, {
+                    "full_name": variant["full_name"],
+                    "paintkit_codename": codename,
+                    "wear_from": float(variant["wear_from"]) if variant.get("wear_from") is not None else None,
+                    "wear_to": float(variant["wear_to"]) if variant.get("wear_to") is not None else None,
+                    "wear_kind": wear_kind,
+                    "kind": int(variant_kind),
+                }, index_elements=["full_name"])
+
+        session.commit()
+        logger.info("Skins data saved to database (%s)", db_url)
+
+
+def _produced_keys(skins: dict) -> tuple[set[str], set[str]]:
+    """Paintkit codenames and variant full_names the parser currently produces
+    and would persist (variants filtered exactly like save_skins_to_db)."""
+    codenames: set[str] = set()
+    full_names: set[str] = set()
+    for skin_data in skins.values():
+        pk_data = skin_data["paintkit"]
+        item_data = skin_data["item"]
+        codenames.add(_skin_codename(item_data["codename"], pk_data["codename"]))
+        for variant in (skin_data.get("variants") or []):
+            if not isinstance(variant, dict):
+                continue
+            if _VARIANT_KIND_MAP.get(variant.get("kind")) is None:
+                continue
+            full_names.add(variant["full_name"])
+    return codenames, full_names
+
+
+# Skins kept in the DB even though the parser no longer produces them (they
+# have no source in current game data). M4A4 | Howl is contraband — pulled from
+# its case but still a real, traded StatTrak skin.
+PROTECTED_PAINTKITS = frozenset({"weapon_m4a1_cu_m4a1_howling"})
+
+
+def prune_orphaned_skins(skins: dict, db_url: str, apply: bool = False,
+                         protect_paintkits: frozenset = PROTECTED_PAINTKITS) -> dict:
+    """Delete DB rows the parser no longer produces, syncing the DB to the
+    current parser output. Removes unreleased/phantom skins, variants that lost
+    a kind, renamed variants (e.g. old non-★ knife names), etc.
+
+    Rows whose paintkit_codename is in protect_paintkits are always kept, even
+    when the parser no longer produces them (e.g. contraband like M4A4 | Howl).
+
+    apply=False (default) is a dry run: it only reports what WOULD be deleted.
+    Returns a dict of counts.
+    """
+    keep_codenames, keep_full_names = _produced_keys(skins)
+    if not keep_full_names or not keep_codenames:
+        raise ValueError("refusing to prune: parser produced nothing (would wipe the DB)")
+
+    engine = create_engine(db_url)
+    with engine.begin() as conn:
+        # Protect specific skins that the parser no longer produces: keep their
+        # existing codenames and variant names so they survive the anti-join.
+        if protect_paintkits:
+            keep_codenames = keep_codenames | set(protect_paintkits)
+            protected_names = conn.execute(
+                sa.text("SELECT full_name FROM paintkit_variants WHERE paintkit_codename IN :codes")
+                  .bindparams(sa.bindparam("codes", expanding=True)),
+                {"codes": list(protect_paintkits)},
+            )
+            keep_full_names = keep_full_names | {r[0] for r in protected_names}
+
+        db_full_names = {r[0] for r in conn.execute(sa.text("SELECT full_name FROM paintkit_variants"))}
+        db_codenames = {r[0] for r in conn.execute(sa.text("SELECT codename FROM paintkits"))}
+        orphan_variants = db_full_names - keep_full_names
+        orphan_paintkits = db_codenames - keep_codenames
+        counts = {
+            "orphan_variants": len(orphan_variants),
+            "orphan_paintkits": len(orphan_paintkits),
+            "applied": apply,
+        }
+
+        if not apply:
+            logger.info("Prune dry-run (%s): %s", db_url, counts)
+            return counts
+
+        # Stage surviving keys in temp tables and delete via anti-join, so the
+        # DELETEs don't depend on statement-length limits. Order respects FKs:
+        # variants first (removes the rows referencing soon-to-be-deleted
+        # paintkits), then the paintkit_collections links, then paintkits, then
+        # any collection left unreferenced.
+        conn.execute(sa.text("CREATE TEMP TABLE _keep_v (full_name text PRIMARY KEY) ON COMMIT DROP"))
+        conn.execute(sa.text("CREATE TEMP TABLE _keep_p (codename text PRIMARY KEY) ON COMMIT DROP"))
+        conn.execute(sa.text("INSERT INTO _keep_v (full_name) VALUES (:v)"), [{"v": x} for x in keep_full_names])
+        conn.execute(sa.text("INSERT INTO _keep_p (codename) VALUES (:c)"), [{"c": x} for x in keep_codenames])
+
+        counts["deleted_variants"] = conn.execute(sa.text(
+            "DELETE FROM paintkit_variants WHERE full_name NOT IN (SELECT full_name FROM _keep_v)"
+        )).rowcount
+        counts["deleted_paintkit_collections"] = conn.execute(sa.text(
+            "DELETE FROM paintkit_collections WHERE paintkit_codename NOT IN (SELECT codename FROM _keep_p)"
+        )).rowcount
+        counts["deleted_paintkits"] = conn.execute(sa.text(
+            "DELETE FROM paintkits WHERE codename NOT IN (SELECT codename FROM _keep_p)"
+        )).rowcount
+        counts["deleted_collections"] = conn.execute(sa.text(
+            "DELETE FROM collections WHERE codename NOT IN (SELECT collection_codename FROM paintkit_collections)"
+        )).rowcount
+        logger.info("Pruned DB (%s): %s", db_url, counts)
+
+    return counts

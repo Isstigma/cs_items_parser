@@ -1,3 +1,5 @@
 vdf
 requests
 ujson
+sqlmodel
+psycopg2-binary
