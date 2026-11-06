@@ -67,7 +67,12 @@ Three layers, each wrapping the one below:
    market-hash-name-keyed dicts. `get_skins()` is the core: it pairs every item
    with every paintkit, filters to combinations that actually exist
    (`skin_exists`), computes wear-range `Variant`s, and applies StatTrak™ /
-   Souvenir / ★ (Star) prefixes based on prefab trees and collection membership.
+   Souvenir / ★ (Star) prefixes. StatTrak™ is decided from prefab trees and
+   collection membership. Souvenir is generated for **every non-★ skin**
+   (except the `default` paintkit), because since the CS2 update of 2026-05-22
+   (Souvenir-O-Matic) almost any non-StatTrak skin can be made a Souvenir.
+   StatTrak™ and Souvenir are separate sets built from the base wears; there is
+   never a combined "Souvenir StatTrak™".
    Hardcoded correction tables live in `__init__` (`souvenir_collections`,
    `blank_collections`, `nonexisting_containers`, `tinted_graffities_limited`)
    to patch known gaps/quirks in Valve's data.
@@ -93,8 +98,9 @@ column appended via `_tbl.append_column(...)` **outside the ORM mapper** (so
 `merge()` never touches it but `create_all()` still emits it as an identity
 column) — keep that pattern if you add tables. Enums: `RarityEnum`,
 `WearKindEnum`, `ItemKindEnum`, `VariantKindEnum`. `save_skins_to_db()` uses
-`session.merge()` (upsert-by-PK) and **skips Souvenir variants** (only Normal /
-Stattrak / Star are mapped). This schema is mirrored — with slight divergence —
+`session.merge()` (upsert-by-PK) and maps the variant kinds to `VariantKindEnum`
+(`Normal`=0, `Stattrak`=1, `Souvenir`=3; 2 = star is obsolete, since ★ is only a
+name prefix). Souvenir rows **are** written: about 6.8k of the ~21.4k variants. This schema is mirrored — with slight divergence —
 in `surveillance_backend/app/models/shared.py`; changing one usually means
 changing the other.
 
